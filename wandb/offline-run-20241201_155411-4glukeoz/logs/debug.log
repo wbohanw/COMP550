@@ -1,0 +1,22 @@
+2024-12-01 15:54:11,588 INFO    MainThread:2875769 [wandb_setup.py:_flush():68] Configure stats pid to 2875769
+2024-12-01 15:54:11,589 INFO    MainThread:2875769 [wandb_setup.py:_flush():68] Loading settings from /home/mcb/users/yzhang551/.config/wandb/settings
+2024-12-01 15:54:11,602 INFO    MainThread:2875769 [wandb_setup.py:_flush():68] Loading settings from /home/mcb/users/yzhang551/zyj/experiements/COMP550/HingeABL/wandb/settings
+2024-12-01 15:54:11,614 INFO    MainThread:2875769 [wandb_setup.py:_flush():68] Loading settings from environment variables: {'_require_service': 'True'}
+2024-12-01 15:54:11,627 INFO    MainThread:2875769 [wandb_setup.py:_flush():68] Inferring run settings from compute environment: {'program_relpath': 'train.py', 'program': '/home/mcb/users/yzhang551/zyj/experiements/COMP550/HingeABL/train.py'}
+2024-12-01 15:54:11,640 INFO    MainThread:2875769 [wandb_setup.py:_flush():68] Applying login settings: {'mode': 'offline'}
+2024-12-01 15:54:11,646 INFO    MainThread:2875769 [wandb_init.py:_log_setup():492] Logging user logs to /home/mcb/users/yzhang551/zyj/experiements/COMP550/HingeABL/wandb/offline-run-20241201_155411-4glukeoz/logs/debug.log
+2024-12-01 15:54:11,654 INFO    MainThread:2875769 [wandb_init.py:_log_setup():493] Logging internal logs to /home/mcb/users/yzhang551/zyj/experiements/COMP550/HingeABL/wandb/offline-run-20241201_155411-4glukeoz/logs/debug-internal.log
+2024-12-01 15:54:11,663 INFO    MainThread:2875769 [wandb_init.py:init():532] calling init triggers
+2024-12-01 15:54:11,673 INFO    MainThread:2875769 [wandb_init.py:init():538] wandb.init called with sweep_config: {}
+config: {}
+2024-12-01 15:54:11,685 INFO    MainThread:2875769 [wandb_init.py:init():588] starting backend
+2024-12-01 15:54:11,689 INFO    MainThread:2875769 [wandb_init.py:init():592] setting up manager
+2024-12-01 15:54:11,707 INFO    MainThread:2875769 [backend.py:_multiprocessing_setup():106] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2024-12-01 15:54:11,722 INFO    MainThread:2875769 [wandb_init.py:init():599] backend started and connected
+2024-12-01 15:54:11,732 INFO    MainThread:2875769 [wandb_init.py:init():687] updated telemetry
+2024-12-01 15:54:11,799 INFO    MainThread:2875769 [wandb_init.py:init():775] starting run threads in backend
+2024-12-01 15:54:18,144 INFO    MainThread:2875769 [wandb_run.py:_console_start():2114] atexit reg
+2024-12-01 15:54:18,146 INFO    MainThread:2875769 [wandb_run.py:_redirect():1969] redirect: SettingsConsole.WRAP_RAW
+2024-12-01 15:54:18,147 INFO    MainThread:2875769 [wandb_run.py:_redirect():2034] Wrapping output streams.
+2024-12-01 15:54:18,147 INFO    MainThread:2875769 [wandb_run.py:_redirect():2059] Redirects installed.
+2024-12-01 15:54:18,151 INFO    MainThread:2875769 [wandb_init.py:init():817] run started, returning control to user process
