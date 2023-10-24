@@ -3,10 +3,14 @@
 Plese download DocRED at https://github.com/thunlp/DocRED/tree/master/data
 =======
 # HingeABL
+<<<<<<< HEAD
 Codes for paper "Adaptive Hinge Balance Loss for Document-Level Relation Extraction", Findings of EMNLP 2023
 <<<<<<< HEAD
 >>>>>>> d301a0b (Initial commit)
 =======
+=======
+Codes for paper "Adaptive Hinge Balance Loss for Document-Level Relation Extraction", Findings of EMNLP 2023.
+>>>>>>> 8d56c76 (Add files via upload)
 ## Requirements
 * Python (tested on 3.7.4)
 * CUDA (tested on 11.3)
