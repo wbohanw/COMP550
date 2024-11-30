@@ -1,2 +1,2 @@
 # COMP550
-This is README
+Plese download DocRED at https://github.com/thunlp/DocRED/tree/master/data
