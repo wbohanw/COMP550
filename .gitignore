@@ -1,8 +1,6 @@
-<<<<<<< HEAD
 .idea/
 DocRED/
-=======
 /wandb
 /result
 /__pycache__
->>>>>>> 970212d (HingeABL model running)
+/dataset
