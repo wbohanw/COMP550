@@ -6,4 +6,4 @@ DocRED/
 /__pycache__
 /dataset
 /checkpoint
-/dataset
+/dataset/*
