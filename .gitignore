@@ -3,7 +3,8 @@
 DocRED/
 /wandb
 /result
-/__pycache__
+/__pycache__/*
 /dataset
 /checkpoint
 /dataset/*
+checkpoint/
