@@ -1,10 +1,8 @@
-/cache
+cache/*
 .idea/
-DocRED/
-/wandb
+DocRED/*
+wandb/*
 /result
 /__pycache__/*
-/dataset
-/checkpoint
-/dataset/*
-checkpoint/
+checkpoint/*
+dataset/*
