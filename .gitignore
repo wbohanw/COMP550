@@ -1,6 +1,8 @@
+/cache
 .idea/
 DocRED/
 /wandb
 /result
 /__pycache__
 /dataset
+/checkpoint

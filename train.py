@@ -39,7 +39,7 @@ def train(args, model, train_features, dev_features, test_features):
                           'hts': batch[4],
                           }
                 labels = batch[2].to('cuda')
-                with torch.cuda.amp.autocast():
+                with torch.amp.autocast('cuda'):
                     logits = model(**inputs)
                     if args.loss_type == 'ATL':
                         loss = get_at_loss(logits, labels)
@@ -84,7 +84,7 @@ def train(args, model, train_features, dev_features, test_features):
                             torch.save(model.state_dict(), args.save_path)
         return best_dev_output
 
-    scaler = torch.cuda.amp.GradScaler()
+    scaler = torch.amp.GradScaler('cuda')
     new_layer = ["extractor", "bilinear", "projector", "classifier"]
     optimizer_grouped_parameters = [
         {"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in new_layer)], },
@@ -111,7 +111,7 @@ def evaluate(args, model, features, tag="dev"):
                   'hts': batch[4],
                   }
         with torch.no_grad():
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):
                 logits = model(**inputs)
             pred = get_label(args, logits, num_labels=4)
             pred = pred.cpu().numpy()
@@ -148,7 +148,7 @@ def report(args, model, features):
                   }
 
         with torch.no_grad():
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):
                 logits = model(**inputs)
             pred = get_label(args, logits, num_labels=args.num_labels)
             pred = pred.cpu().numpy()
@@ -221,6 +221,8 @@ def main():
     parser.add_argument('--pos_only', action='store_true')
     parser.add_argument("--cuda_device", type=int, default=0,
                         help="0/1/2/3")
+    parser.add_argument("--cache_dir", default="./cache", type=str,
+                    help="Directory to cache pretrained models.")
     args = parser.parse_args()
     if args.load_path == "" and not args.disable_log:
         wandb.init(project=args.proj_name, name=args.run_name)
@@ -236,9 +238,9 @@ def main():
         num_labels=args.num_class,
     )
     tokenizer = AutoTokenizer.from_pretrained(
-        args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
+        args.model_name_or_path,
+        cache_dir=args.cache_dir
     )
-
     read = read_docred
 
     train_file = os.path.join(args.data_dir, args.train_file)
@@ -253,6 +255,7 @@ def main():
         args.model_name_or_path,
         from_tf=bool(".ckpt" in args.model_name_or_path),
         config=config,
+        cache_dir=args.cache_dir
     )
 
     config.cls_token_id = tokenizer.cls_token_id
@@ -266,15 +269,15 @@ def main():
             set_seed(args)
             result_item = dict()
             result_item['seed'] = args.seed
-            args.save_path = 'checkpoint/' + args.save_name + '.pt'
+            args.save_path = './checkpoint/' + args.save_name + '.pt'
             best_dev_output = train(args, model, train_features, dev_features, test_features)
-            with open('result/' + args.save_name + '_dev.json', 'w') as f:
+            with open('./result/' + args.save_name + '_dev.json', 'w') as f:
                 json.dump(best_dev_output, f)
             model.load_state_dict(torch.load(args.save_path))
             test_score, test_output = evaluate(args, model, test_features, tag="test")
             result_item['result'] = test_output
             print('seed:{}, result:{}'.format(args.seed, test_output))
-            with open('result/' + args.save_name + '_test.json', 'w') as f:
+            with open('./result/' + args.save_name + '_test.json', 'w') as f:
                 json.dump(result_item, f)
         else:
             dev_results = []
@@ -293,7 +296,7 @@ def main():
                 test_item = dict()
                 dev_item['seed'] = args.seed
                 test_item['seed'] = args.seed
-                args.save_path = 'checkpoint/' + args.save_name + '_seed=' + str(args.seed) + '.pt'
+                args.save_path = './checkpoint/' + args.save_name + '_seed=' + str(args.seed) + '.pt'
                 best_dev_output = train(args, model, train_features, dev_features, test_features)
                 dev_item['result'] = best_dev_output
                 test_score, test_output = evaluate(args, model, test_features, tag="test")
@@ -301,8 +304,8 @@ def main():
                 test_item['result'] = test_output
                 dev_results.append(dev_item)
                 test_results.append(test_item)
-            dev_file_name = 'result/' + args.save_name + '_dev_seed='
-            test_file_name = 'result/' + args.save_name + '_test_seed='
+            dev_file_name = './result/' + args.save_name + '_dev_seed='
+            test_file_name = './result/' + args.save_name + '_test_seed='
             for seed in args.nseed:
                 dev_file_name = dev_file_name + '_' + str(seed)
                 test_file_name = test_file_name + '_' + str(seed)
@@ -320,7 +323,7 @@ def main():
         test_score, test_output = evaluate(args, model, test_features, tag="test")
         print('seed:{}, result:{}'.format(args.seed, test_output))
         result_item['result'] = test_output
-        with open('result/' + args.save_name + '_test.json', 'w') as f:
+        with open('./result/' + args.save_name + '_test.json', 'w') as f:
             json.dump(result_item, f)
 
 
