@@ -15,7 +15,7 @@
                 "--train_file", "train_annotated.json",
                 "--dev_file", "dev_revised.json",
                 "--test_file", "dev_revised.json",
-                "--train_batch_size", "4",
+                "--train_batch_size", "8",
                 "--test_batch_size", "8",
                 "--gradient_accumulation_steps", "1",
                 "--num_labels", "4",
@@ -25,10 +25,11 @@
                 "--num_train_epochs", "1",
                 "--seed", "66",
                 "--num_class", "97",
-                "--loss_type", "HingeABL",
-                "--save_name", "docred_bert_HingeABL",
+                "--loss_type", "SAT",
+                "--save_name", "SAT_cl",
                 "--proj_name", "docred",
-                "--run_name", "bert_HingeABL"
+                "--run_name", "bert_onlyATL",
+                "--use_cl", "1"
             ]
         }
     ]

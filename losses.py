@@ -3,6 +3,109 @@ import torch.nn.functional as F
 from copy import deepcopy
 
 
+
+def construct_positive_negative_pairs(hs, rs, ts, num_negative_samples=6, use_hard_negatives=True):
+    """
+    构造正负样本对
+    Args:
+        hs: [N, D] 头实体的嵌入 (Head)
+        rs: [N, D] 关系的嵌入 (Relation)
+        ts: [N, D] 尾实体的嵌入 (Tail)
+        num_negative_samples: 每个正样本采样的负样本数量
+        use_hard_negatives: 是否引入困难负样本
+
+    Returns:
+        positive_pairs: 正样本对的相似度列表
+        negative_pairs: 负样本对的相似度列表
+    """
+    device = hs.device
+    num_samples = hs.size(0)
+
+    # 正样本对
+    positive_sim = F.cosine_similarity(hs + rs, ts, dim=-1)
+
+    # 负样本对
+    negative_sim = []
+    for i in range(num_samples):
+        # 创建整数索引排除当前样本 i
+        neg_indices = torch.arange(num_samples, device=device, dtype=torch.long)
+        neg_indices = neg_indices[neg_indices != i]  # 排除当前样本 i
+        neg_indices = neg_indices[:min(len(neg_indices), num_negative_samples)]  # 确保切片数量
+
+        # 验证 neg_indices 的类型和形状
+        assert neg_indices.dtype in [torch.int32, torch.int64], f"Invalid dtype: {neg_indices.dtype}"
+        assert neg_indices.dim() == 1, f"Invalid shape: {neg_indices.shape}"
+
+        # 负样本计算
+        neg_hs = hs[neg_indices] + rs[neg_indices]
+        neg_ts = ts[i].expand_as(neg_hs)
+        sim = F.cosine_similarity(neg_hs, neg_ts, dim=-1)
+
+        # 如果使用困难负样本
+        if use_hard_negatives:
+            hard_neg_count = max(1, num_negative_samples // 2)
+            topk_sim, _ = torch.topk(sim, k=min(hard_neg_count, sim.size(0)))
+            sim = topk_sim
+
+        negative_sim.append(sim)
+
+    # 将负样本相似度拼接到一起
+    negative_sim = torch.cat(negative_sim, dim=0).to(device)
+    return positive_sim, negative_sim
+
+
+
+import torch
+import torch.nn.functional as F
+
+def compute_contrastive_loss(hs_pos, ts_pos, rs_pos, hs_neg, ts_neg, rs_neg, temperature):
+    """
+    计算对比学习的 InfoNCE 损失
+
+    Args:
+        hs_pos: 正样本头实体嵌入 [N, D]
+        ts_pos: 正样本尾实体嵌入 [N, D]
+        rs_pos: 正样本关系嵌入 [N, D]
+        hs_neg: 负样本头实体嵌入 [M, D]
+        ts_neg: 负样本尾实体嵌入 [M, D]
+        rs_neg: 负样本关系嵌入 [M, D]
+        temperature: 对比学习温度参数
+
+    Returns:
+        cl_loss: 对比学习损失
+    """
+    # 构造正样本对
+    positive_sim = F.cosine_similarity(hs_pos + rs_pos, ts_pos, dim=-1)  # [N]
+
+    # 构造负样本对
+    num_pos = hs_pos.size(0)  # 正样本数量
+    num_neg = hs_neg.size(0)  # 负样本数量
+
+    # 负样本特征扩展
+    neg_hs_rs = (hs_neg + rs_neg).unsqueeze(0).expand(num_pos, num_neg, -1)  # [N, M, D]
+    neg_ts = ts_neg.unsqueeze(0).expand(num_pos, num_neg, -1)  # [N, M, D]
+
+    # 计算负样本对的相似度
+    negative_sim = F.cosine_similarity(neg_hs_rs, neg_ts, dim=-1)  # [N, M]
+
+    # 计算正样本 logits
+    temperature = max(temperature, 0.1)  # 确保温度不小于 0.1
+    positive_logits = positive_sim / temperature  # [N]
+
+    # 计算负样本 logits
+    negative_logits = negative_sim / temperature  # [N, M]
+
+    # 计算负样本 log-sum-exp
+    negative_log_sum = torch.logsumexp(negative_logits, dim=-1)  # [N]
+
+    # 计算 InfoNCE 损失
+    cl_loss = -torch.mean(positive_logits - negative_log_sum)
+
+    return cl_loss
+
+
+
+    
 def get_label(args, logits, num_labels=-1):
     if args.loss_type == 'balance_softmax':
         th_logit = torch.zeros_like(logits[..., :1])

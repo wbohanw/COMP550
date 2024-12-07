@@ -2,9 +2,9 @@ python train.py --data_dir ./dataset/docred \
 --transformer_type bert \
 --model_name_or_path bert-base-cased \
 --train_file train_annotated.json \
---dev_file dev.json \
---test_file dev.json \
---train_batch_size 4 \
+--dev_file dev_revised.json \
+--test_file dev_revised.json \
+--train_batch_size 6 \
 --test_batch_size 8 \
 --gradient_accumulation_steps 1 \
 --num_labels 4 \
