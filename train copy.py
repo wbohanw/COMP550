@@ -12,76 +12,137 @@ from prepro import read_docred
 from evaluation_revised import to_official, official_evaluate
 import wandb
 from losses import get_label, get_at_loss, get_balance_loss, get_af_loss, get_sat_loss, get_mean_sat_loss, \
-    get_relu_sat_loss, get_margin_loss, get_hrl_loss
+    get_relu_sat_loss, get_margin_loss, compute_contrastive_loss, get_improved_aml_loss
+from tqdm import tqdm
 
+from tqdm import tqdm
 
 def train(args, model, train_features, dev_features, test_features):
     def finetune(features, optimizer, num_epoch, num_steps):
         best_score = -1
         best_dev_output = None
         train_dataloader = DataLoader(features, batch_size=args.train_batch_size, shuffle=True, collate_fn=collate_fn, drop_last=True)
-        train_iterator = range(int(num_epoch))
         total_steps = int(len(train_dataloader) * num_epoch // args.gradient_accumulation_steps)
         warmup_steps = int(total_steps * args.warmup_ratio)
         scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
         print("Total steps: {}".format(total_steps))
         print("Warmup steps: {}".format(warmup_steps))
-        for epoch in train_iterator:
-            print('epoch: {}'.format(epoch))
-            model.zero_grad()
-            for step, batch in enumerate(train_dataloader):
-                cur_lr = optimizer.state_dict()['param_groups'][0]['lr']
-                wandb.log({"lr": cur_lr}, step=num_steps)
-                model.train()
-                inputs = {'input_ids': batch[0].to('cuda'),
-                          'attention_mask': batch[1].to('cuda'),
-                          'entity_pos': batch[3],
-                          'hts': batch[4],
-                          }
-                labels = batch[2].to('cuda')
-                with torch.amp.autocast('cuda'):
-                    logits = model(**inputs)
-                    if args.loss_type == 'ATL':
-                        loss = get_at_loss(logits, labels)
-                    elif args.loss_type == 'balance_softmax':
-                        loss = get_balance_loss(logits, labels)
-                    elif args.loss_type == 'AFL':
-                        loss = get_af_loss(logits, labels)
-                    elif args.loss_type =='SAT':
-                        loss = get_sat_loss(logits, labels)
-                    elif args.loss_type == 'MeanSAT':
-                        loss = get_mean_sat_loss(logits, labels)
-                    elif args.loss_type == 'HingeABL':
-                        loss = get_relu_sat_loss(logits, labels, args.margin)
-                    elif args.loss_type == 'AML':
-                        loss = get_margin_loss(logits, labels)
+        lambda_cl = args.lambda_cl  # 初始对比学习损失权重
 
-                    loss = loss / args.gradient_accumulation_steps
-                scaler.scale(loss).backward()
-                if step % args.gradient_accumulation_steps == 0:
-                    scaler.unscale_(optimizer)
-                    if args.max_grad_norm > 0:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-                    scaler.step(optimizer)
-                    scaler.update()
-                    scheduler.step()
-                    model.zero_grad()
-                    num_steps += 1
-                wandb.log({"loss": loss.item()}, step=num_steps)
-                if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0
-                                                               and num_steps % args.evaluation_steps == 0
-                                                               and step % args.gradient_accumulation_steps == 0):
-                    lr = optimizer.state_dict()['param_groups'][0]['lr']
-                    print("epoch:{}, lr:{}".format(epoch, lr))
-                    dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
-                    wandb.log(dev_output, step=num_steps)
-                    print(dev_output)
-                    if dev_score > best_score:
-                        best_score = dev_score
-                        best_dev_output = dev_output
-                        print('best f1: {}'.format(best_score))
-                        if args.save_path != "":
-                            torch.save(model.state_dict(), args.save_path)
+        for epoch in range(int(num_epoch)):
+            print(f"Epoch {epoch + 1}/{int(num_epoch)}:")
+            model.zero_grad()
+
+            # 添加进度条，显示 batch 进度
+            with tqdm(total=len(train_dataloader), desc=f"Training Epoch {epoch + 1}") as pbar:
+                for step, batch in enumerate(train_dataloader):
+                    cur_lr = optimizer.state_dict()['param_groups'][0]['lr']
+                    wandb.log({"lr": cur_lr}, step=num_steps)
+                    model.train()
+                    inputs = {'input_ids': batch[0].to('cuda'),
+                              'attention_mask': batch[1].to('cuda'),
+                              'entity_pos': batch[3],
+                            
+                              'hts': batch[4],
+                              'labels': batch[2].to('cuda'),
+                              }
+                    labels = batch[2].to('cuda')
+                    with torch.amp.autocast('cuda'):
+                        if args.use_cl:
+                            
+                            logits, contrastive_features = model(**inputs, return_contrastive_features=True)
+
+                           
+                            pos_features = contrastive_features["positive"]
+                            neg_features = contrastive_features["negative"]
+
+                            
+                            cl_loss = compute_contrastive_loss(
+                                hs_pos=pos_features["head"],
+                                ts_pos=pos_features["tail"],
+                                rs_pos=pos_features["relation"],
+                                hs_neg=neg_features["head"],
+                                ts_neg=neg_features["tail"],
+                                rs_neg=neg_features["relation"],
+                                temperature=args.cl_temperature
+                            )
+
+                            if args.loss_type == 'ATL':
+                                task_loss = get_at_loss(logits, labels)
+                            elif args.loss_type == 'balance_softmax':
+                                task_loss = get_balance_loss(logits, labels)
+                            elif args.loss_type == 'AFL':
+                                task_loss = get_af_loss(logits, labels)
+                            elif args.loss_type == 'SAT':
+                                task_loss = get_sat_loss(logits, labels)
+                            elif args.loss_type == 'MeanSAT':
+                                task_loss = get_mean_sat_loss(logits, labels)
+                            elif args.loss_type == 'HingeABL':
+                                task_loss = get_relu_sat_loss(logits, labels, args.margin)
+                            elif args.loss_type == 'AML':
+                                task_loss = get_margin_loss(logits, labels)
+                            elif args.loss_type == 'New_AML':
+                                task_loss = get_improved_aml_loss(logits, labels)
+                            else:
+                                task_loss = 0.0
+
+                            if args.adjust_lambda_cl:
+                                lambda_cl = min(args.lambda_cl_max, lambda_cl + args.lambda_cl_step)
+                                wandb.log({"lambda_cl": lambda_cl}, step=num_steps)
+
+                            # 总损失
+                            loss = lambda_cl * cl_loss + (1 - lambda_cl) * task_loss
+                            # loss = cl_loss
+                        else:
+                            # 不使用对比学习
+                            logits = model(**inputs)
+                            if args.loss_type == 'ATL':
+                                loss = get_at_loss(logits, labels)
+                            elif args.loss_type == 'balance_softmax':
+                                loss = get_balance_loss(logits, labels)
+                            elif args.loss_type == 'AFL':
+                                loss = get_af_loss(logits, labels)
+                            elif args.loss_type == 'SAT':
+                                loss = get_sat_loss(logits, labels)
+                            elif args.loss_type == 'MeanSAT':
+                                loss = get_mean_sat_loss(logits, labels)
+                            elif args.loss_type == 'HingeABL':
+                                loss = get_relu_sat_loss(logits, labels, args.margin)
+                            elif args.loss_type == 'AML':
+                                loss = get_margin_loss(logits, labels)
+                            elif args.loss_type == 'New_AML':
+                                task_loss = get_improved_aml_loss(logits, labels)
+                            else:
+                                loss = 0.0
+
+                        loss = loss / args.gradient_accumulation_steps
+                    scaler.scale(loss).backward()
+                    if step % args.gradient_accumulation_steps == 0:
+                        scaler.unscale_(optimizer)
+                        if args.max_grad_norm > 0:
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
+                        scaler.step(optimizer)
+                        scaler.update()
+                        scheduler.step()
+                        model.zero_grad()
+                        num_steps += 1
+                    wandb.log({"loss": loss.item()}, step=num_steps)
+                    pbar.update(1)  # 更新进度条
+
+                    if (step + 1) == len(train_dataloader) - 1 or (args.evaluation_steps > 0
+                                                                   and num_steps % args.evaluation_steps == 0
+                                                                   and step % args.gradient_accumulation_steps == 0):
+                        lr = optimizer.state_dict()['param_groups'][0]['lr']
+                        print("epoch:{}, lr:{}".format(epoch, lr))
+                        dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
+                        wandb.log(dev_output, step=num_steps)
+                        print(dev_output)
+                        if dev_score > best_score:
+                            best_score = dev_score
+                            best_dev_output = dev_output
+                            print('best f1: {}'.format(best_score))
+                            if args.save_path != "":
+                                torch.save(model.state_dict(), args.save_path)
         return best_dev_output
 
     scaler = torch.amp.GradScaler('cuda')
@@ -112,7 +173,7 @@ def evaluate(args, model, features, tag="dev"):
                   }
         with torch.no_grad():
             with torch.amp.autocast('cuda'):
-                logits = model(**inputs)
+                logits = model(**inputs,return_contrastive_features=False)
             pred = get_label(args, logits, num_labels=4)
             pred = pred.cpu().numpy()
             pred[np.isnan(pred)] = 0
@@ -162,6 +223,26 @@ def report(args, model, features):
 
 def main():
     parser = argparse.ArgumentParser()
+
+    # 对比学习相关参数
+    parser.add_argument("--use_cl", type=int, default=1,
+                        help="Whether to use contrastive learning in the training.")
+    parser.add_argument("--lambda_cl", default=0.05, type=float,
+                        help="Initial weight for the contrastive loss.")
+    parser.add_argument("--adjust_lambda_cl", action="store_true",
+                        help="Whether to dynamically adjust the weight of the contrastive loss during training.")
+    parser.add_argument("--lambda_cl_max", default=0.3, type=float,
+                        help="Maximum weight for the contrastive loss when adjusting dynamically.")
+    parser.add_argument("--lambda_cl_step", default=0.01, type=float,
+                        help="Step size to increase the contrastive loss weight during training.")
+
+    # 对比学习损失相关参数
+    parser.add_argument("--cl_temperature", default=0.1, type=float,
+                        help="Temperature parameter for scaling contrastive loss logits.")
+    parser.add_argument("--cl_margin", default=0.5, type=float,
+                        help="Margin used to determine similarity in contrastive learning.")
+
+
     parser.add_argument("--data_dir", default="./dataset/docred", type=str)
     parser.add_argument("--transformer_type", default="bert", type=str)
     parser.add_argument("--model_name_or_path", default="bert-base-cased", type=str)
@@ -219,7 +300,7 @@ def main():
     parser.add_argument('--nseed', nargs='+', type=int, default=[])  # 一次传入多个seed，重复多个实验
     parser.add_argument('--disable_log', action='store_true')
     parser.add_argument('--pos_only', action='store_true')
-    parser.add_argument("--cuda_device", type=int, default=0,
+    parser.add_argument("--cuda_device", type=int, default=1,
                         help="0/1/2/3")
     parser.add_argument("--cache_dir", default="./cache", type=str,
                     help="Directory to cache pretrained models.")

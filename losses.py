@@ -317,3 +317,51 @@ def get_margin_loss(logits, labels):
     loss = loss.mean()
     return loss
 
+def get_improved_aml_loss(logits, labels, initial_margin=1.0, num_hard_negatives=3, alpha=0.3, beta=0.3, smoothing=0.01, current_step=0, decay_rate=0.005):
+    """Improved AML Loss with stability adjustments."""
+    device = logits.device
+
+    # 动态调整边界
+    margin = max(1.0, initial_margin - decay_rate * current_step)
+
+    # 标签平滑
+    num_classes = labels.size(1)
+    smoothed_labels = labels * (1 - smoothing) + smoothing / num_classes
+
+    # 分离正负样本
+    th_label = torch.zeros_like(labels, dtype=torch.float).to(device)
+    th_label[:, 0] = 1.0  # 标记 TH 类
+    labels[:, 0] = 0.0    # 避免正样本影响 TH 类
+
+    p_mask = labels  # 正样本掩码
+    n_mask = 1 - labels  # 负样本掩码
+    n_mask[:, 0] = 0.0  # TH 类不算负样本
+
+    # 屏蔽非目标 logits
+    logit1 = logits.masked_fill(p_mask == 0, -1e6)  # 只保留正样本
+    logit2 = logits.masked_fill(n_mask == 0, -1e6)  # 只保留负样本
+
+    # 稳定计算 log_softmax
+    log_probs1 = F.log_softmax(logit1, dim=-1) * p_mask
+    log_probs2 = F.log_softmax(logit2, dim=-1) * n_mask
+
+    # 归一化正负样本损失
+    loss1 = -log_probs1.sum(1) / (p_mask.sum(1) + 1e-10)  # 正样本损失
+    loss2 = -log_probs2.sum(1) / (n_mask.sum(1) + 1e-10)  # 负样本损失
+
+    # Hinge 损失
+    logit3 = 1 - logits + logits[:, 0].unsqueeze(1)
+    loss3 = (F.relu(logit3 + margin) * p_mask).sum(1) / (p_mask.sum(1) + 1e-10)
+
+    logit4 = 1 + logits - logits[:, 0].unsqueeze(1)
+    loss4 = (F.relu(logit4 + margin) * n_mask).sum(1) / (n_mask.sum(1) + 1e-10)
+
+    # 动态权重
+    hinge_loss = loss3 + loss4
+    base_loss = loss1 + loss2
+    loss = alpha * base_loss + beta * hinge_loss
+
+    # 平均化损失
+    loss = loss.mean()
+    return loss
+

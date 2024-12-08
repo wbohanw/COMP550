@@ -11,29 +11,34 @@ class DocREModel(nn.Module):
                  emb_size=768,
                  block_size=64,
                  num_labels=-1,
-                 num_attention_heads=8):  # 增加多头注意力机制参数
+                 num_attention_heads=8):
         super().__init__()
         self.config = config
         self.model = model
         self.hidden_size = config.hidden_size
 
-        self.head_extractor = nn.Linear(2 * config.hidden_size, emb_size)
-        self.tail_extractor = nn.Linear(2 * config.hidden_size, emb_size)
-        self.bilinear = nn.Linear(emb_size * block_size, config.num_labels)
-
         self.emb_size = emb_size
         self.block_size = block_size
         self.num_labels = num_labels
 
-        # 共享的投影层
+        # 双向GRU用于特征聚合
+        self.entity_encoder = nn.GRU(input_size=self.hidden_size,
+                                     hidden_size=self.hidden_size,
+                                     bidirectional=True,
+                                     batch_first=True)
+
+        # 双线性注意力机制
+        self.bilinear_attention = nn.Bilinear(emb_size, emb_size, num_labels)
+
+        # 投影层
         self.projection_layer = nn.Sequential(
             nn.Linear(2 * config.hidden_size, emb_size),
             nn.ReLU(),
-            nn.Linear(self.emb_size, self.emb_size)
+            nn.Linear(emb_size, emb_size)
         )
-        
-        # 多头注意力层
-        self.multihead_attention = nn.MultiheadAttention(embed_dim=emb_size, num_heads=num_attention_heads)
+
+        # 分类器
+        self.bilinear = nn.Linear(emb_size * block_size, config.num_labels)
 
     def encode(self, input_ids, attention_mask):
         config = self.config
@@ -46,49 +51,39 @@ class DocREModel(nn.Module):
         sequence_output, attention = process_long_input(self.model, input_ids, attention_mask, start_tokens, end_tokens)
         return sequence_output, attention
 
-    def get_hrt(self, sequence_output, attention, entity_pos, hts):
+    def get_entity_embeddings(self, sequence_output, entity_pos):
         offset = 1 if self.config.transformer_type in ["bert", "roberta"] else 0
-        n, h, _, c = attention.size()
+        entity_embs = []
+
+        for i, entity_list in enumerate(entity_pos):
+            batch_entity_embs = []
+            for e in entity_list:
+                e_embs = []
+                for start, end in e:
+                    if start + offset < sequence_output.size(1):
+                        e_embs.append(sequence_output[i, start + offset])
+                if len(e_embs) > 0:
+                    e_embs = torch.stack(e_embs, dim=0)  # [entity_length, hidden_size]
+                    # 使用双向GRU聚合特征
+                    e_embs, _ = self.entity_encoder(e_embs.unsqueeze(0))  # [1, entity_length, 2*hidden_size]
+                    e_embs = e_embs.squeeze(0).mean(0)  # 聚合为 [2*hidden_size]
+                else:
+                    e_embs = torch.zeros(2 * self.hidden_size).to(sequence_output.device)
+                batch_entity_embs.append(e_embs)
+            entity_embs.append(torch.stack(batch_entity_embs, dim=0))  # [n_entities, 2*hidden_size]
+        return entity_embs
+
+    def get_hrt(self, sequence_output, entity_pos, hts):
+        entity_embs = self.get_entity_embeddings(sequence_output, entity_pos)
         hss, tss, rss = [], [], []
 
-        for i in range(len(entity_pos)):
-            entity_embs = []
-            entity_weights = []
+        for i, ht_pairs in enumerate(hts):
+            ht_pairs = torch.LongTensor(ht_pairs).to(sequence_output.device)
+            hs = torch.index_select(entity_embs[i], 0, ht_pairs[:, 0])  # [n_pairs, 2*hidden_size]
+            ts = torch.index_select(entity_embs[i], 0, ht_pairs[:, 1])  # [n_pairs, 2*hidden_size]
 
-            for e in entity_pos[i]:
-                e_emb, e_weight = [], []
-                for start, end in e:
-                    if start + offset < c:
-                        e_emb.append(sequence_output[i, start + offset])
-                        e_weight.append(attention[i, :, start + offset])
-                if len(e_emb) > 0:
-                    e_emb = torch.logsumexp(torch.stack(e_emb, dim=0), dim=0)
-                    e_weight = torch.stack(e_weight, dim=0).mean(0)
-                else:
-                    e_emb = torch.zeros(self.config.hidden_size).to(sequence_output)
-                    e_weight = torch.zeros(h, c).to(attention)
-                entity_embs.append(e_emb)
-                entity_weights.append(e_weight)
-
-            entity_embs = torch.stack(entity_embs, dim=0)  # [n_e, d]
-            entity_weights = torch.stack(entity_weights, dim=0)  # [n_e, h, seq_len]
-
-            ht_i = torch.LongTensor(hts[i]).to(sequence_output.device)
-            hs = torch.index_select(entity_embs, 0, ht_i[:, 0])
-            ts = torch.index_select(entity_embs, 0, ht_i[:, 1])
-
-            h_weight = torch.index_select(entity_weights, 0, ht_i[:, 0])
-            t_weight = torch.index_select(entity_weights, 0, ht_i[:, 1])
-            
-            # 动态权重计算
-            ht_att = (h_weight * t_weight).sum(1)
-            ht_att = ht_att / (ht_att.sum(1, keepdim=True) + 1e-5)
-
-            # 应用多头注意力
-            rs = contract("ld,rl->rd", sequence_output[i], ht_att)
-            rs, _ = self.multihead_attention(rs.unsqueeze(0), rs.unsqueeze(0), rs.unsqueeze(0))
-            rs = rs.squeeze(0)
-
+            # 计算关系嵌入
+            rs = torch.stack([sequence_output[i].mean(dim=0) for _ in range(len(ht_pairs))])  # 平均池化
             hss.append(hs)
             tss.append(ts)
             rss.append(rs)
@@ -107,9 +102,9 @@ class DocREModel(nn.Module):
                 return_contrastive_features=False):
         # 编码输入序列
         sequence_output, attention = self.encode(input_ids, attention_mask)
-        
-        # 提取局部特征
-        hs, rs, ts = self.get_hrt(sequence_output, attention, entity_pos, hts)
+
+        # 获取实体头、尾和关系嵌入
+        hs, rs, ts = self.get_hrt(sequence_output, entity_pos, hts)
 
         if return_contrastive_features:
             # 正负样本掩码
@@ -118,7 +113,7 @@ class DocREModel(nn.Module):
             neg_mask = is_first_class & is_rest_zero
             pos_mask = ~neg_mask
 
-            # 提取特征
+            # 提取正负样本
             hs_pos, rs_pos, ts_pos = hs[pos_mask], rs[pos_mask], ts[pos_mask]
             hs_neg, rs_neg, ts_neg = hs[neg_mask], rs[neg_mask], ts[neg_mask]
 
@@ -134,9 +129,9 @@ class DocREModel(nn.Module):
             hs_neg_proj = F.normalize(hs_neg_proj, p=2, dim=-1)
             ts_neg_proj = F.normalize(ts_neg_proj, p=2, dim=-1)
 
-        # 主任务分类
-        hs_proj = torch.tanh(self.head_extractor(torch.cat([hs, rs], dim=1)))
-        ts_proj = torch.tanh(self.tail_extractor(torch.cat([ts, rs], dim=1)))
+        # 分类任务
+        hs_proj = torch.tanh(self.projection_layer(hs))
+        ts_proj = torch.tanh(self.projection_layer(ts))
 
         b1 = hs_proj.view(-1, self.emb_size // self.block_size, self.block_size)
         b2 = ts_proj.view(-1, self.emb_size // self.block_size, self.block_size)
