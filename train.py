@@ -6,7 +6,7 @@ import ujson as json
 from torch.utils.data import DataLoader
 from transformers import AutoConfig, AutoModel, AutoTokenizer
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
-from model_gnn import DocREModel
+from model_new import DocREModel
 from utils import set_seed, collate_fn
 from prepro import read_docred
 from evaluation_revised import to_official, official_evaluate
@@ -120,7 +120,7 @@ def train(args, model, train_features, dev_features, test_features):
 
                     pbar.update(1)
 
-                # 在每轮结束后进行 dev 评估
+                # dev
                 dev_score, dev_output = evaluate(args, model, dev_features, tag="dev")
                 print(f"Epoch {epoch + 1}: Dev F1 = {dev_output}")
                 wandb.log(dev_output, step=num_steps)
@@ -128,15 +128,15 @@ def train(args, model, train_features, dev_features, test_features):
                 if dev_score > best_score:
                     best_score = dev_score
                     best_dev_output = dev_output
-                    best_model_state = model.state_dict()  # 保存当前最优模型权重
+                    best_model_state = model.state_dict()  
 
-        # 结束训练后评估 test
-        model.load_state_dict(best_model_state)  # 加载最优模型权重
+        # test
+        model.load_state_dict(best_model_state)  
         test_score, test_output = evaluate(args, model, test_features, tag="test")
         print(test_output)
         wandb.log(test_output)
 
-        # 保存最后的 dev 和 test 结果到 result 文件夹
+        # result 
         result["dev"] = best_dev_output
         result["test"] = test_output
         result_path = os.path.join("./result", f"{args.save_name}_result.json")
@@ -203,18 +203,18 @@ def evaluate(args, model, features, tag="dev"):
 def main():
     parser = argparse.ArgumentParser()
 
-    # 对比学习相关参数
+    
     parser.add_argument("--use_cl", type=int, default=1, help="Whether to use contrastive learning in the training.")
-    parser.add_argument("--lambda_cl", default=0.05, type=float, help="Initial weight for the contrastive loss.")
+    parser.add_argument("--lambda_cl", default=0.01, type=float, help="Initial weight for the contrastive loss.")
     parser.add_argument("--adjust_lambda_cl", action="store_true", help="Dynamically adjust contrastive loss weight.")
-    parser.add_argument("--lambda_cl_max", default=0.3, type=float, help="Max weight for the contrastive loss.")
+    parser.add_argument("--lambda_cl_max", default=0.05, type=float, help="Max weight for the contrastive loss.")
     parser.add_argument("--lambda_cl_step", default=0.01, type=float, help="Step size for contrastive loss weight.")
 
-    # 对比学习损失相关参数
+
     parser.add_argument("--cl_temperature", default=0.1, type=float, help="Temperature for contrastive loss.")
     parser.add_argument("--cl_margin", default=0.5, type=float, help="Margin for similarity in contrastive loss.")
 
-    # 数据和模型相关参数
+
     parser.add_argument("--data_dir", default="./dataset/docred", type=str)
     parser.add_argument("--transformer_type", default="bert", type=str)
     parser.add_argument("--model_name_or_path", default="bert-base-cased", type=str)
@@ -225,12 +225,12 @@ def main():
     parser.add_argument("--save_path", default="./checkpoint", type=str)
     parser.add_argument("--load_path", default="", type=str)
 
-    # Tokenizer和模型配置
+    # Tokenizer
     parser.add_argument("--config_name", default="", type=str, help="Pretrained config name if not the same.")
     parser.add_argument("--tokenizer_name", default="", type=str, help="Pretrained tokenizer name if not the same.")
     parser.add_argument("--max_seq_length", default=1024, type=int, help="Maximum sequence length.")
 
-    # 训练相关参数
+
     parser.add_argument("--train_batch_size", default=4, type=int, help="Batch size for training.")
     parser.add_argument("--test_batch_size", default=8, type=int, help="Batch size for testing.")
     parser.add_argument("--gradient_accumulation_steps", default=1, type=int, help="Steps for gradient accumulation.")
@@ -257,7 +257,7 @@ def main():
     parser.add_argument("--cache_dir", default="./cache", type=str, help="Cache directory for pretrained models.")
     args = parser.parse_args()
 
-    # 设置环境
+
     if args.load_path == "" and not args.disable_log:
         wandb.init(project=args.proj_name, name=args.run_name)
     else:
@@ -268,7 +268,7 @@ def main():
     args.device = torch.device(f"cuda:{args.cuda_device}" if torch.cuda.is_available() else "cpu")
     set_seed(args)
 
-    # 加载数据
+
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, cache_dir=args.cache_dir)
     train_features = read_docred(os.path.join(args.data_dir, args.train_file), tokenizer, args.max_seq_length)
     dev_features = read_docred(os.path.join(args.data_dir, args.dev_file), tokenizer, args.max_seq_length)
@@ -287,7 +287,7 @@ def main():
     model = DocREModel(config, base_model, num_labels=args.num_labels)
     model.to(args.device)
 
-    # 加载或训练模型
+
     if args.load_path:
         model.load_state_dict(torch.load(args.load_path))
         test_score, test_output = evaluate(args, model, test_features, tag="test")
@@ -303,12 +303,6 @@ def main():
             best_dev_output = train(args, model, train_features, dev_features, test_features)
             print("Training complete. Best dev output:", best_dev_output)
 
-        # 保存结果
-        # result_path = f"./result/{args.save_name}_result.json"
-        # os.makedirs("./result", exist_ok=True)
-        # with open(result_path, "w") as f:
-        #     json.dump(best_dev_output, f, indent=4)
-        # print(f"Results saved to {result_path}")
 
 
 

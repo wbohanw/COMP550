@@ -11,7 +11,7 @@ class DocREModel(nn.Module):
                  emb_size=768,
                  block_size=64,
                  num_labels=-1,
-                 num_attention_heads=8):  # 增加多头注意力机制参数
+                 num_attention_heads=8):  
         super().__init__()
         self.config = config
         self.model = model
@@ -25,14 +25,14 @@ class DocREModel(nn.Module):
         self.block_size = block_size
         self.num_labels = num_labels
 
-        # 共享的投影层
+
         self.projection_layer = nn.Sequential(
             nn.Linear(2 * config.hidden_size, emb_size),
             nn.ReLU(),
             nn.Linear(self.emb_size, self.emb_size)
         )
         
-        # 多头注意力层
+
         self.multihead_attention = nn.MultiheadAttention(embed_dim=emb_size, num_heads=num_attention_heads)
 
     def encode(self, input_ids, attention_mask):
@@ -80,11 +80,11 @@ class DocREModel(nn.Module):
             h_weight = torch.index_select(entity_weights, 0, ht_i[:, 0])
             t_weight = torch.index_select(entity_weights, 0, ht_i[:, 1])
             
-            # 动态权重计算
+
             ht_att = (h_weight * t_weight).sum(1)
             ht_att = ht_att / (ht_att.sum(1, keepdim=True) + 1e-5)
 
-            # 应用多头注意力
+
             rs = contract("ld,rl->rd", sequence_output[i], ht_att)
             rs, _ = self.multihead_attention(rs.unsqueeze(0), rs.unsqueeze(0), rs.unsqueeze(0))
             rs = rs.squeeze(0)
@@ -105,36 +105,36 @@ class DocREModel(nn.Module):
                 hts=None,
                 labels=None,
                 return_contrastive_features=False):
-        # 编码输入序列
+
         sequence_output, attention = self.encode(input_ids, attention_mask)
         
-        # 提取局部特征
+
         hs, rs, ts = self.get_hrt(sequence_output, attention, entity_pos, hts)
 
         if return_contrastive_features:
-            # 正负样本掩码
+
             is_first_class = labels[:, 0] == 1
             is_rest_zero = labels[:, 1:].sum(dim=1) == 0
             neg_mask = is_first_class & is_rest_zero
             pos_mask = ~neg_mask
 
-            # 提取特征
+
             hs_pos, rs_pos, ts_pos = hs[pos_mask], rs[pos_mask], ts[pos_mask]
             hs_neg, rs_neg, ts_neg = hs[neg_mask], rs[neg_mask], ts[neg_mask]
 
-            # 投影
+
             hs_pos_proj = self.projection_layer(torch.cat([hs_pos, rs_pos], dim=1))
             ts_pos_proj = self.projection_layer(torch.cat([ts_pos, rs_pos], dim=1))
             hs_neg_proj = self.projection_layer(torch.cat([hs_neg, rs_neg], dim=1))
             ts_neg_proj = self.projection_layer(torch.cat([ts_neg, rs_neg], dim=1))
 
-            # 归一化
+
             hs_pos_proj = F.normalize(hs_pos_proj, p=2, dim=-1)
             ts_pos_proj = F.normalize(ts_pos_proj, p=2, dim=-1)
             hs_neg_proj = F.normalize(hs_neg_proj, p=2, dim=-1)
             ts_neg_proj = F.normalize(ts_neg_proj, p=2, dim=-1)
 
-        # 主任务分类
+
         hs_proj = torch.tanh(self.head_extractor(torch.cat([hs, rs], dim=1)))
         ts_proj = torch.tanh(self.tail_extractor(torch.cat([ts, rs], dim=1)))
 

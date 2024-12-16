@@ -59,46 +59,32 @@ import torch
 import torch.nn.functional as F
 
 def compute_contrastive_loss(hs_pos, ts_pos, rs_pos, hs_neg, ts_neg, rs_neg, temperature):
-    """
-    计算对比学习的 InfoNCE 损失
 
-    Args:
-        hs_pos: 正样本头实体嵌入 [N, D]
-        ts_pos: 正样本尾实体嵌入 [N, D]
-        rs_pos: 正样本关系嵌入 [N, D]
-        hs_neg: 负样本头实体嵌入 [M, D]
-        ts_neg: 负样本尾实体嵌入 [M, D]
-        rs_neg: 负样本关系嵌入 [M, D]
-        temperature: 对比学习温度参数
 
-    Returns:
-        cl_loss: 对比学习损失
-    """
-    # 构造正样本对
     positive_sim = F.cosine_similarity(hs_pos + rs_pos, ts_pos, dim=-1)  # [N]
 
-    # 构造负样本对
-    num_pos = hs_pos.size(0)  # 正样本数量
-    num_neg = hs_neg.size(0)  # 负样本数量
+    
+    num_pos = hs_pos.size(0)  
+    num_neg = hs_neg.size(0)  
 
-    # 负样本特征扩展
+   
     neg_hs_rs = (hs_neg + rs_neg).unsqueeze(0).expand(num_pos, num_neg, -1)  # [N, M, D]
     neg_ts = ts_neg.unsqueeze(0).expand(num_pos, num_neg, -1)  # [N, M, D]
 
-    # 计算负样本对的相似度
+    
     negative_sim = F.cosine_similarity(neg_hs_rs, neg_ts, dim=-1)  # [N, M]
 
-    # 计算正样本 logits
-    temperature = max(temperature, 0.1)  # 确保温度不小于 0.1
-    positive_logits = positive_sim / temperature  # [N]
+    
+    temperature = max(temperature, 0.1)  
+    positive_logits = positive_sim / temperature  
 
-    # 计算负样本 logits
+    
     negative_logits = negative_sim / temperature  # [N, M]
 
-    # 计算负样本 log-sum-exp
+    #  log-sum-exp
     negative_log_sum = torch.logsumexp(negative_logits, dim=-1)  # [N]
 
-    # 计算 InfoNCE 损失
+    
     cl_loss = -torch.mean(positive_logits - negative_log_sum)
 
     return cl_loss
@@ -321,47 +307,46 @@ def get_improved_aml_loss(logits, labels, initial_margin=1.0, num_hard_negatives
     """Improved AML Loss with stability adjustments."""
     device = logits.device
 
-    # 动态调整边界
+
     margin = max(1.0, initial_margin - decay_rate * current_step)
 
-    # 标签平滑
+
     num_classes = labels.size(1)
     smoothed_labels = labels * (1 - smoothing) + smoothing / num_classes
 
-    # 分离正负样本
+
     th_label = torch.zeros_like(labels, dtype=torch.float).to(device)
-    th_label[:, 0] = 1.0  # 标记 TH 类
-    labels[:, 0] = 0.0    # 避免正样本影响 TH 类
+    th_label[:, 0] = 1.0 
+    labels[:, 0] = 0.0    
 
-    p_mask = labels  # 正样本掩码
-    n_mask = 1 - labels  # 负样本掩码
-    n_mask[:, 0] = 0.0  # TH 类不算负样本
+    p_mask = labels 
+    n_mask = 1 - labels  
+    n_mask[:, 0] = 0.0 
 
-    # 屏蔽非目标 logits
-    logit1 = logits.masked_fill(p_mask == 0, -1e6)  # 只保留正样本
-    logit2 = logits.masked_fill(n_mask == 0, -1e6)  # 只保留负样本
+ 
+    logit1 = logits.masked_fill(p_mask == 0, -1e6) 
+    logit2 = logits.masked_fill(n_mask == 0, -1e6)  
 
-    # 稳定计算 log_softmax
+    #  log_softmax
     log_probs1 = F.log_softmax(logit1, dim=-1) * p_mask
     log_probs2 = F.log_softmax(logit2, dim=-1) * n_mask
 
-    # 归一化正负样本损失
-    loss1 = -log_probs1.sum(1) / (p_mask.sum(1) + 1e-10)  # 正样本损失
-    loss2 = -log_probs2.sum(1) / (n_mask.sum(1) + 1e-10)  # 负样本损失
+    loss1 = -log_probs1.sum(1) / (p_mask.sum(1) + 1e-10)  
+    loss2 = -log_probs2.sum(1) / (n_mask.sum(1) + 1e-10)  
 
-    # Hinge 损失
+    # Hinge 
     logit3 = 1 - logits + logits[:, 0].unsqueeze(1)
     loss3 = (F.relu(logit3 + margin) * p_mask).sum(1) / (p_mask.sum(1) + 1e-10)
 
     logit4 = 1 + logits - logits[:, 0].unsqueeze(1)
     loss4 = (F.relu(logit4 + margin) * n_mask).sum(1) / (n_mask.sum(1) + 1e-10)
 
-    # 动态权重
+
     hinge_loss = loss3 + loss4
     base_loss = loss1 + loss2
     loss = alpha * base_loss + beta * hinge_loss
 
-    # 平均化损失
+
     loss = loss.mean()
     return loss
 

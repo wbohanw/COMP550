@@ -16,7 +16,7 @@ def set_seed(args):
 
 def collate_fn(batch):
     # time1 = time.time()
-    # 将labels变成one-hot形式
+    # =
     labels = []
     for f in batch:
         max_rlen = len(f['labels'][0]) if f['labels'] else 1
@@ -42,7 +42,7 @@ def collate_fn(batch):
     # labels = [f["labels"] for f in batch]
     # time2 = time.time()
     max_len = max([len(f["input_ids"]) for f in batch])
-    # 粗暴地padding
+    # padding
     input_ids = [f["input_ids"] + [0] * (max_len - len(f["input_ids"])) for f in batch]
     input_mask = [[1.0] * len(f["input_ids"]) + [0.0] * (max_len - len(f["input_ids"])) for f in batch]
     entity_pos = [f["entity_pos"] for f in batch]

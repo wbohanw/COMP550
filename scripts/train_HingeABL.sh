@@ -3,7 +3,7 @@ python train.py --data_dir ./dataset/docred \
 --model_name_or_path bert-base-cased \
 --train_file train_annotated.json \
 --dev_file dev_revised.json \
---test_file dev_revised.json \
+--test_file test_revised.json \
 --train_batch_size 6 \
 --test_batch_size 8 \
 --gradient_accumulation_steps 1 \
@@ -15,6 +15,8 @@ python train.py --data_dir ./dataset/docred \
 --seed 66 \
 --num_class 97 \
 --loss_type HingeABL \
---save_name docred_bert_HingeABL \
+--save_name docred_bert_HingeABL_old_cl \
 --proj_name docred \
---run_name bert_HingeABL
+--run_name bert_HingeABL \
+--use_cl 1 \
+--cuda_device 1
