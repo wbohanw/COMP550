@@ -145,7 +145,7 @@ def train(args, model, train_features, dev_features, test_features):
             json.dump(result, f, indent=4)
         print(f"Results saved to {result_path}")
 
-        # 保存最优模型到文件
+        # 
         save_path = os.path.join(f"{args.save_path}", f"{args.save_name}.bin")
         torch.save(best_model_state, save_path)
         print(f"Best model saved to {save_path}")
